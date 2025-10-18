@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  satip-recorder:
+    build: .
+    image: satip-recorder:latest
+    container_name: satip-recorder
+    
+    # Environment variables
+    environment:
+      - STREAM_URL=${STREAM_URL}
+      - TIMEZONE=${TIMEZONE:-Europe/Vienna}
+    
+    # Volume mount for recordings
+    volumes:
+      - ./recordings:/recordings
+    
+    # Restart policy: no (container should exit after recording)
+    restart: "no"
+    
+    # Network mode: bridge (default)
+    network_mode: bridge
+    
+    # Optional: resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 512M
+
+# Example usage:
+# Start with command-line arguments:
+#   docker compose run --rm satip-recorder 60 morning_show
+#
+# Or override command in docker compose:
+#   docker compose run --rm satip-recorder 120 evening_news
+
