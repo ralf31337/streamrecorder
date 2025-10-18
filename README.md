@@ -11,7 +11,25 @@ A lightweight Docker container for recording SATIP streams to MP3 files using ff
 - Lightweight container that exits after recording completes
 - Ideal for scheduled recordings via cron on TrueNAS or other systems
 
-## Quick Start
+## Pre-built Image (Recommended for TrueNAS)
+
+A pre-built Docker image is automatically published to GitHub Container Registry on every commit.
+
+**Image URL:** `ghcr.io/ralf31337/streamrecorder:latest`
+
+You can use this image directly without building it yourself:
+
+```bash
+docker pull ghcr.io/ralf31337/streamrecorder:latest
+
+# Run directly
+docker run --rm \
+  --env-file .env \
+  -v /mnt/recordings:/recordings \
+  ghcr.io/ralf31337/streamrecorder:latest 60 morning_show
+```
+
+## Quick Start (Building Locally)
 
 ### 1. Build the Docker Image
 
@@ -146,7 +164,7 @@ docker build -t satip-recorder:latest .
    - **Description**: Record Morning Show
    - **Command**: 
      ```bash
-     docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings satip-recorder:latest 60 morning_show
+     docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 60 morning_show
      ```
    - **Schedule**: 
      - Minute: `0`
@@ -169,13 +187,13 @@ Add cron entries:
 
 ```bash
 # Record morning show daily at 8:00 AM for 60 minutes
-0 8 * * * docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings satip-recorder:latest 60 morning_show
+0 8 * * * docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 60 morning_show
 
 # Record evening news daily at 8:00 PM for 30 minutes
-0 20 * * * docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings satip-recorder:latest 30 evening_news
+0 20 * * * docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 30 evening_news
 
 # Record weekend special on Saturdays at 10:00 AM for 120 minutes
-0 10 * * 6 docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings satip-recorder:latest 120 weekend_special
+0 10 * * 6 docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 120 weekend_special
 ```
 
 ### Cron Schedule Examples
@@ -290,8 +308,8 @@ TIMEZONE=Europe/Berlin
 Use in cron:
 
 ```bash
-0 8 * * * docker run --rm --env-file /path/to/.env.stream1 -v /recordings:/recordings satip-recorder 60 stream1
-0 9 * * * docker run --rm --env-file /path/to/.env.stream2 -v /recordings:/recordings satip-recorder 60 stream2
+0 8 * * * docker run --rm --env-file /path/to/.env.stream1 -v /recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 60 stream1
+0 9 * * * docker run --rm --env-file /path/to/.env.stream2 -v /recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 60 stream2
 ```
 
 ## License
