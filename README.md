@@ -127,34 +127,100 @@ docker compose run --rm satip-recorder 60 morning_show
 
 ## TrueNAS Setup
 
-### Step 1: Deploy Container
+### Prerequisites: Volume Mount Setup
+
+Before deploying the container, ensure your recordings directory exists and has proper permissions.
+
+#### Using TrueNAS Dataset (Recommended)
+
+If storing recordings in a dataset (e.g., `/mnt/pool/recordings`):
+
+1. **Create/Verify Dataset:**
+   - Go to **Storage** → **Pools**
+   - Navigate to your pool (e.g., `A-primary`)
+   - If needed, create a dataset: `A-music/radio`
+
+2. **Set Permissions via Shell (SSH):**
+   ```bash
+   # SSH into TrueNAS
+   ssh root@truenas-ip
+   
+   # Create directory if it doesn't exist
+   mkdir -p /mnt/pool/recordings
+   
+   # Set permissions (allow Docker access)
+   chmod 755 /mnt/pool/recordings
+   
+   # Optional: Set ownership to your user
+   chown -R 1000:1000 /mnt/pool/recordings
+   ```
+
+3. **Verify Path:**
+   ```bash
+   ls -la /mnt/pool/recordings
+   ```
+
+### Method 1: Using Docker Compose (Recommended for TrueNAS SCALE)
+
+1. **Copy docker-compose file to TrueNAS:**
+   ```bash
+   # SSH into TrueNAS
+   mkdir -p /mnt/pool/docker-configs
+   cd /mnt/pool/docker-configs
+   
+   # Create docker-compose.yml with nano or vi
+   nano docker-compose.yml
+   ```
+
+2. **Use this configuration:**
+   ```yaml
+   version: '3.8'
+   
+   services:
+     satip-recorder:
+       image: ghcr.io/ralf31337/streamrecorder:latest
+       container_name: satip-recorder
+       
+       environment:
+         - >-
+           STREAM_URL=http://your-satip-server/?src=1&freq=11053&pol=h&ro=0.35&msys=dvbs2&mtype=8psk&plts=off&sr=22000&fec=34&sid=28429&pids=0,18,120,121
+         - TIMEZONE=Europe/Vienna
+       
+       volumes:
+         - /mnt/pool/recordings:/recordings
+       
+       restart: "no"
+       network_mode: bridge
+   ```
+
+3. **Test the setup:**
+   ```bash
+   cd /mnt/pool/docker-configs
+   docker compose pull
+   docker compose run --rm satip-recorder 1 test
+   ```
+
+4. **Check for test recording:**
+   ```bash
+   ls -lh /mnt/pool/recordings/
+   ```
+
+### Method 2: Using TrueNAS Web Interface
 
 1. In TrueNAS web interface, go to **Apps** or **Containers**
 2. Click **Launch Docker Image** or **Add Custom App**
 3. Configure:
-   - **Image Repository**: `satip-recorder:latest` (after building)
+   - **Image Repository**: `ghcr.io/ralf31337/streamrecorder:latest`
    - **Restart Policy**: Never (important!)
    - **Environment Variables**:
-     - `STREAM_URL`: Your SATIP stream URL
-     - `TIMEZONE`: Your timezone (e.g., `Europe/Vienna`)
+     - `STREAM_URL`: `http://your-satip-server/?src=1&freq=11053&pol=h&ro=0.35&msys=dvbs2&mtype=8psk&plts=off&sr=22000&fec=34&sid=28429&pids=0,18,120,121`
+     - `TIMEZONE`: `Europe/Vienna`
    - **Storage**:
      - Mount Type: Host Path
-     - Host Path: `/mnt/pool/recordings` (or your desired path)
+     - Host Path: `/mnt/pool/recordings`
      - Container Path: `/recordings`
 
-### Step 2: Build the Image on TrueNAS
-
-SSH into TrueNAS and build:
-
-```bash
-# Copy files to TrueNAS
-cd /mnt/pool/docker/satip-recorder
-
-# Build image
-docker build -t satip-recorder:latest .
-```
-
-### Step 3: Set Up Cron Jobs
+### Set Up Cron Jobs
 
 #### Method A: TrueNAS Web Interface
 
@@ -164,7 +230,7 @@ docker build -t satip-recorder:latest .
    - **Description**: Record Morning Show
    - **Command**: 
      ```bash
-     docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 60 morning_show
+     docker compose -f /mnt/pool/docker-configs/docker-compose.yml run --rm satip-recorder 60 morning_show
      ```
    - **Schedule**: 
      - Minute: `0`
@@ -175,6 +241,11 @@ docker build -t satip-recorder:latest .
    - **User**: root
    - **Enable**: ✓
 
+**Alternative (direct docker run):**
+```bash
+docker run --rm -e STREAM_URL="http://your-satip-server/?params" -e TIMEZONE="Europe/Vienna" -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 60 morning_show
+```
+
 #### Method B: Shell (crontab)
 
 SSH into TrueNAS:
@@ -183,17 +254,27 @@ SSH into TrueNAS:
 crontab -e
 ```
 
-Add cron entries:
+Add cron entries (using docker compose):
 
 ```bash
 # Record morning show daily at 8:00 AM for 60 minutes
-0 8 * * * docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 60 morning_show
+0 8 * * * docker compose -f /mnt/pool/docker-configs/docker-compose.yml run --rm satip-recorder 60 morning_show
 
 # Record evening news daily at 8:00 PM for 30 minutes
-0 20 * * * docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 30 evening_news
+0 20 * * * docker compose -f /mnt/pool/docker-configs/docker-compose.yml run --rm satip-recorder 30 evening_news
 
 # Record weekend special on Saturdays at 10:00 AM for 120 minutes
-0 10 * * 6 docker run --rm --env-file /mnt/pool/docker/satip-recorder/.env -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 120 weekend_special
+0 10 * * 6 docker compose -f /mnt/pool/docker-configs/docker-compose.yml run --rm satip-recorder 120 weekend_special
+```
+
+**Alternative (direct docker run):**
+
+```bash
+# Record morning show daily at 8:00 AM for 60 minutes
+0 8 * * * docker run --rm -e STREAM_URL="http://your-satip-server/?params" -e TIMEZONE="Europe/Vienna" -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 60 morning_show
+
+# Record evening news daily at 8:00 PM for 30 minutes
+0 20 * * * docker run --rm -e STREAM_URL="http://your-satip-server/?params" -e TIMEZONE="Europe/Vienna" -v /mnt/pool/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 30 evening_news
 ```
 
 ### Cron Schedule Examples
