@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  satip-recorder:
+    image: ghcr.io/ralf31337/streamrecorder:latest
+    container_name: satip-recorder
+    
+    # Environment variables
+    environment:
+      - >-
+        STREAM_URL=http://your-satip-server/?src=1&freq=11053&pol=h&ro=0.35&msys=dvbs2&mtype=8psk&plts=off&sr=22000&fec=34&sid=28429&pids=0,18,120,121
+      - TIMEZONE=Europe/Vienna
+    
+    # Volume mount for recordings
+    volumes:
+      - /mnt/pool/recordings:/recordings
+    
+    # Restart policy: no (container exits after recording)
+    restart: "no"
+    
+    # Network mode
+    network_mode: bridge
+
+# To run this container with arguments, use:
+# docker compose -f docker-compose.truenas.yml run --rm satip-recorder 60 morning_show
+#
+# Or in cron:
+# 0 8 * * * docker compose -f /path/to/docker-compose.truenas.yml run --rm satip-recorder 60 morning_show
+

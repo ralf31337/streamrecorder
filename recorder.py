@@ -95,6 +95,19 @@ def record_stream(stream_url, duration_minutes, file_prefix, output_dir, timezon
         if output_file.exists():
             file_size = output_file.stat().st_size
             logger.info(f"File size: {file_size / 1024 / 1024:.2f} MB")
+            
+            # Create symlink for latest recording
+            symlink_path = output_dir / f"{file_prefix}.mp3"
+            try:
+                # Remove existing symlink if it exists
+                if symlink_path.exists() or symlink_path.is_symlink():
+                    symlink_path.unlink()
+                # Create new symlink pointing to the new recording
+                symlink_path.symlink_to(output_file.name)
+                logger.info(f"Symlink created: {symlink_path} -> {output_file.name}")
+            except Exception as e:
+                logger.warning(f"Could not create symlink: {e}")
+                # Don't fail the recording if symlink creation fails
         else:
             logger.error("Output file was not created!")
             sys.exit(1)
