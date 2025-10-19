@@ -30,7 +30,7 @@ services:
     network_mode: bridge
 ```
 
-**Note:** Replace `your-satip-server` and `/mnt/pool/recordings` with your actual values.
+**Note:** Replace `your-satip-server` and `/mnt/poolname/datasetname/recordings` with your actual values.
 
 Test recording (1 minute):
 
@@ -60,7 +60,7 @@ docker run --rm \
 
 **Output Files:**
 - `PREFIX_YYYYMMDD_HHMMSS.mp3` - Timestamped recording
-- `PREFIX.mp3` - Symlink to the latest recording (useful for SMB access)
+- `links/PREFIX.mp3` - Symlink to the latest recording (useful for SMB access)
 
 ## TrueNAS SCALE Setup
 
@@ -94,8 +94,8 @@ In TrueNAS web interface:
 
 **Alternative via SSH (if you prefer):**
 ```bash
-sudo chown -R 568:568 /mnt/pool/recordings
-sudo chmod -R 755 /mnt/pool/recordings
+sudo chown -R 568:568 /mnt/poolname/datasetname/recordings
+sudo chmod -R 755 /mnt/poolname/datasetname/recordings
 ```
 
 ### 3. Test Recording via Shell
@@ -113,10 +113,11 @@ sudo docker run --rm \
 
 Check for the test file:
 ```bash
-ls -lh /mnt/pool/recordings/
+ls -lh /mnt/poolname/datasetname/recordings/
+ls -lh /mnt/poolname/datasetname/recordings/links/
 ```
 
-If you see a file like `test_YYYYMMDD_HHMMSS.mp3`, permissions are correct!
+If you see a file like `test_YYYYMMDD_HHMMSS.mp3` and a symlink `links/test.mp3`, permissions are correct!
 
 ### 5. Set Up Cron Jobs
 
@@ -167,20 +168,25 @@ grep CRON /var/log/syslog | tail -20
 
 ## Accessing Recordings via SMB
 
-After each recording completes, two files are available:
+After each recording completes, files are organized as:
 
-1. **Timestamped file:** `morning_show_20241018_080000.mp3`
-2. **Symlink (latest):** `morning_show.mp3` → points to the latest recording
-
-**Use Case:** Access your recordings via SMB share with a static filename.
-
-**Example:**
 ```
-\\truenas\recordings\morning_show.mp3  ← Always the latest recording
-\\truenas\recordings\evening_news.mp3  ← Always the latest recording
+/recordings/
+├── morning_show_20241018_080000.mp3  (timestamped recording)
+├── morning_show_20241019_080000.mp3  (timestamped recording)
+└── links/
+    └── morning_show.mp3 → ../morning_show_20241019_080000.mp3  (latest)
 ```
 
-The symlink is automatically updated after each successful recording, so your media player or app can always access the latest recording using the same path.
+**Use Case:** Access the latest recordings via SMB share with a static filename.
+
+**Example SMB paths:**
+```
+\\truenas\recordings\links\morning_show.mp3  ← Always the latest recording
+\\truenas\recordings\links\evening_news.mp3  ← Always the latest recording
+```
+
+The symlink in the `links` folder is automatically updated after each successful recording, so your media player or app can always access the latest recording using the same path.
 
 ## Technical Details
 
@@ -196,8 +202,8 @@ The symlink is automatically updated after each successful recording, so your me
 If you see permission errors:
 
 ```bash
-sudo chown -R 568:568 /mnt/pool/recordings
-sudo chmod -R 755 /mnt/pool/recordings
+sudo chown -R 568:568 /mnt/poolname/datasetname/recordings
+sudo chmod -R 755 /mnt/poolname/datasetname/recordings
 ```
 
 ### No Output File
