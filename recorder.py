@@ -62,6 +62,21 @@ def record_stream(stream_url, duration_minutes, file_prefix, output_dir, timezon
     logger.info(f"Duration: {duration_minutes} minutes")
     logger.info(f"Output file: {output_file}")
     
+    # Create symlink for latest recording in 'links' subdirectory (before recording starts)
+    links_dir = output_dir / "links"
+    links_dir.mkdir(exist_ok=True)
+    symlink_path = links_dir / f"{file_prefix}.mp3"
+    try:
+        # Remove existing symlink if it exists
+        if symlink_path.exists() or symlink_path.is_symlink():
+            symlink_path.unlink()
+        # Create new symlink pointing to the recording in parent directory
+        symlink_path.symlink_to(Path("..") / output_file.name)
+        logger.info(f"Symlink created: {symlink_path} -> ../{output_file.name}")
+    except Exception as e:
+        logger.warning(f"Could not create symlink: {e}")
+        # Don't fail the recording if symlink creation fails
+    
     # Calculate duration in seconds
     duration_seconds = duration_minutes * 60
     
@@ -95,21 +110,6 @@ def record_stream(stream_url, duration_minutes, file_prefix, output_dir, timezon
         if output_file.exists():
             file_size = output_file.stat().st_size
             logger.info(f"File size: {file_size / 1024 / 1024:.2f} MB")
-            
-            # Create symlink for latest recording in 'links' subdirectory
-            links_dir = output_dir / "links"
-            links_dir.mkdir(exist_ok=True)
-            symlink_path = links_dir / f"{file_prefix}.mp3"
-            try:
-                # Remove existing symlink if it exists
-                if symlink_path.exists() or symlink_path.is_symlink():
-                    symlink_path.unlink()
-                # Create new symlink pointing to the recording in parent directory
-                symlink_path.symlink_to(Path("..") / output_file.name)
-                logger.info(f"Symlink created: {symlink_path} -> ../{output_file.name}")
-            except Exception as e:
-                logger.warning(f"Could not create symlink: {e}")
-                # Don't fail the recording if symlink creation fails
         else:
             logger.error("Output file was not created!")
             sys.exit(1)
