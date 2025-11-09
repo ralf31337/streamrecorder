@@ -194,6 +194,7 @@ app.post('/api/record/start', async (req, res) => {
   }
 
   // Build ffmpeg command
+  // Note: -flush_packets 1 and -fflags +flush_packets force immediate writing to disk
   const ffmpegCmd = [
     'ffmpeg',
     '-re',
@@ -203,6 +204,8 @@ app.post('/api/record/start', async (req, res) => {
     '-ar', '48000',  // Audio sample rate
     '-b:a', '192k',  // Audio bitrate
     '-f', 'mp3',
+    '-fflags', '+flush_packets',  // Flush output packets immediately
+    '-flush_packets', '1',  // Flush packets immediately (write to disk in real-time)
     outputPath
   ];
 
