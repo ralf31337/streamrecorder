@@ -152,28 +152,43 @@
             border: 1px solid #bee5eb;
         }
 
-        .recording-info {
-            margin-top: 20px;
+        .recording-item {
+            margin-top: 15px;
             padding: 15px;
             background: #f8f9fa;
             border-radius: 8px;
-            display: none;
+            border-left: 4px solid #667eea;
         }
 
-        .recording-info.show {
-            display: block;
-        }
-
-        .recording-info h3 {
+        .recording-item h3 {
             color: #333;
             margin-bottom: 10px;
             font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
-        .recording-info p {
+        .recording-item p {
             color: #666;
             margin: 5px 0;
             font-size: 14px;
+        }
+
+        .recording-item .stop-btn {
+            padding: 8px 16px;
+            font-size: 14px;
+            background: #f5576c;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .recording-item .stop-btn:hover {
+            background: #e63950;
+            transform: translateY(-1px);
         }
 
         .pulse {
@@ -229,17 +244,15 @@
 
             <div class="button-group">
                 <button type="button" id="startBtn" class="btn-start">Start Recording</button>
-                <button type="button" id="stopBtn" class="btn-stop" disabled>Stop Recording</button>
             </div>
         </form>
 
         <div class="status" id="status"></div>
 
-        <div class="recording-info" id="recordingInfo">
-            <h3><span class="pulse"></span>Recording in Progress</h3>
-            <p><strong>Name:</strong> <span id="recordingName"></span></p>
-            <p><strong>Output:</strong> <span id="recordingOutput"></span></p>
-            <p><strong>Started:</strong> <span id="recordingStart"></span></p>
+        <div id="activeRecordingsSection" style="display: none;">
+            <h2 style="margin-top: 30px; margin-bottom: 15px; color: #333;">Active Recordings</h2>
+            <div id="activeRecordingsList"></div>
+            <button type="button" id="stopAllBtn" class="btn-stop" style="margin-top: 15px; width: 100%;">Stop All Recordings</button>
         </div>
     </div>
 
@@ -247,12 +260,12 @@
         const streamUrlInput = document.getElementById('streamUrl');
         const nameInput = document.getElementById('name');
         const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
         const statusDiv = document.getElementById('status');
-        const recordingInfo = document.getElementById('recordingInfo');
+        const activeRecordingsSection = document.getElementById('activeRecordingsSection');
+        const activeRecordingsList = document.getElementById('activeRecordingsList');
+        const stopAllBtn = document.getElementById('stopAllBtn');
         const nameError = document.getElementById('nameError');
         
-        let currentRecordingName = null;
         let statusCheckInterval = null;
 
         // Validate name input (letters and numbers only)
@@ -299,14 +312,12 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    currentRecordingName = name;
-                    startBtn.disabled = true;
-                    stopBtn.disabled = false;
-                    streamUrlInput.disabled = true;
-                    nameInput.disabled = true;
+                    // Clear form inputs
+                    streamUrlInput.value = '';
+                    nameInput.value = '';
                     
                     showStatus('Recording started successfully!', 'success');
-                    updateRecordingInfo(data);
+                    await refreshRecordings();
                     startStatusCheck();
                 } else {
                     showStatus(data.error || 'Failed to start recording', 'error');
@@ -316,49 +327,103 @@
             }
         });
 
-        // Stop recording
-        stopBtn.addEventListener('click', async function() {
-            if (!currentRecordingName) {
+        // Stop all recordings
+        stopAllBtn.addEventListener('click', async function() {
+            if (!confirm('Are you sure you want to stop all recordings?')) {
                 return;
             }
 
             try {
-                const response = await fetch('/api/record/stop', {
+                const response = await fetch('/api/record/stop-all', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ name: currentRecordingName })
+                    }
                 });
 
                 const data = await response.json();
 
                 if (response.ok) {
-                    showStatus('Recording stopped successfully!', 'success');
-                    resetUI();
+                    showStatus(`Stopped ${data.stopped.length} recording(s)`, 'success');
+                    await refreshRecordings();
                 } else {
-                    showStatus(data.error || 'Failed to stop recording', 'error');
+                    showStatus(data.error || 'Failed to stop recordings', 'error');
                 }
             } catch (error) {
                 showStatus('Error: ' + error.message, 'error');
             }
         });
 
-        // Check recording status
-        async function checkStatus() {
-            if (!currentRecordingName) return;
-
+        // Stop individual recording
+        async function stopRecording(name) {
             try {
-                const response = await fetch(`/api/record/status?name=${encodeURIComponent(currentRecordingName)}`);
+                const response = await fetch('/api/record/stop', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ name })
+                });
+
                 const data = await response.json();
 
-                if (!data.active) {
-                    showStatus('Recording has stopped', 'info');
-                    resetUI();
+                if (response.ok) {
+                    showStatus(`Recording "${name}" stopped`, 'success');
+                    await refreshRecordings();
+                } else {
+                    showStatus(data.error || 'Failed to stop recording', 'error');
                 }
             } catch (error) {
-                console.error('Error checking status:', error);
+                showStatus('Error: ' + error.message, 'error');
             }
+        }
+
+        // Refresh recordings list
+        async function refreshRecordings() {
+            try {
+                const response = await fetch('/api/record/status');
+                const data = await response.json();
+                
+                const recordings = data.activeRecordings || [];
+                
+                if (recordings.length === 0) {
+                    activeRecordingsSection.style.display = 'none';
+                } else {
+                    activeRecordingsSection.style.display = 'block';
+                    activeRecordingsList.innerHTML = '';
+                    
+                    recordings.forEach(recording => {
+                        const item = document.createElement('div');
+                        item.className = 'recording-item';
+                        
+                        const startTime = new Date(recording.startTime);
+                        const duration = Math.floor((new Date() - startTime) / 1000);
+                        const hours = Math.floor(duration / 3600);
+                        const minutes = Math.floor((duration % 3600) / 60);
+                        const seconds = duration % 60;
+                        const durationStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                        
+                        item.innerHTML = `
+                            <h3>
+                                <span><span class="pulse"></span>${recording.name}</span>
+                                <button class="stop-btn" onclick="stopRecording('${recording.name}')">Stop</button>
+                            </h3>
+                            <p><strong>Output:</strong> ${recording.outputPath}</p>
+                            <p><strong>Started:</strong> ${startTime.toLocaleString()}</p>
+                            <p><strong>Duration:</strong> ${durationStr}</p>
+                        `;
+                        
+                        activeRecordingsList.appendChild(item);
+                    });
+                }
+            } catch (error) {
+                console.error('Error refreshing recordings:', error);
+            }
+        }
+
+        // Check recording status periodically
+        async function checkStatus() {
+            await refreshRecordings();
         }
 
         function startStatusCheck() {
@@ -375,23 +440,6 @@
             }
         }
 
-        function updateRecordingInfo(data) {
-            document.getElementById('recordingName').textContent = data.name;
-            document.getElementById('recordingOutput').textContent = data.outputPath;
-            document.getElementById('recordingStart').textContent = new Date().toLocaleString();
-            recordingInfo.classList.add('show');
-        }
-
-        function resetUI() {
-            currentRecordingName = null;
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-            streamUrlInput.disabled = false;
-            nameInput.disabled = false;
-            recordingInfo.classList.remove('show');
-            stopStatusCheck();
-        }
-
         function showStatus(message, type) {
             statusDiv.textContent = message;
             statusDiv.className = `status ${type} show`;
@@ -404,28 +452,14 @@
             }
         }
 
-        // Check for existing recording on page load
+        // Check for existing recordings on page load
         window.addEventListener('load', async function() {
-            try {
-                const response = await fetch('/api/record/status');
-                const data = await response.json();
-                
-                if (data.activeRecordings && data.activeRecordings.length > 0) {
-                    const recording = data.activeRecordings[0];
-                    currentRecordingName = recording.name;
-                    startBtn.disabled = true;
-                    stopBtn.disabled = false;
-                    streamUrlInput.disabled = true;
-                    nameInput.disabled = false;
-                    nameInput.value = recording.name;
-                    streamUrlInput.value = recording.streamUrl;
-                    updateRecordingInfo(recording);
-                    startStatusCheck();
-                }
-            } catch (error) {
-                console.error('Error checking initial status:', error);
-            }
+            await refreshRecordings();
+            startStatusCheck();
         });
+
+        // Make stopRecording available globally for onclick handlers
+        window.stopRecording = stopRecording;
     </script>
 </body>
 </html>
