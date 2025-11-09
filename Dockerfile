@@ -1,12 +1,13 @@
 # SATIP Stream Recorder Dockerfile
 FROM node:20-slim
 
-# Install Python and ffmpeg
+# Install Python, ffmpeg, and procps (for ps command)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     ffmpeg \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Create recordings directory

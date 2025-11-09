@@ -75,7 +75,12 @@ async function getRunningFfmpegProcesses() {
     if (error.code === 1) {
       return []; // No ffmpeg processes running
     }
-    console.error('Error getting ffmpeg processes:', error);
+    // Check if ps command is missing
+    if (error.message && error.message.includes('ps: not found')) {
+      console.error('ERROR: ps command not found. Please install procps package in the container.');
+      console.error('This is required for process management. Recordings may be running but cannot be tracked.');
+    }
+    console.error('Error getting ffmpeg processes:', error.message || error);
     return [];
   }
 }
