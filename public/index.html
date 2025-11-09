@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stream Recorder</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 2em;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="url"] {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        input[type="url"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        input.error {
+            border-color: #e74c3c;
+        }
+
+        .error-message {
+            color: #e74c3c;
+            font-size: 14px;
+            margin-top: 5px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-start:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-stop {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .btn-stop:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(245, 87, 108, 0.4);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 25px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .status.show {
+            display: block;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .recording-info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .recording-info.show {
+            display: block;
+        }
+
+        .recording-info h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .recording-info p {
+            color: #666;
+            margin: 5px 0;
+            font-size: 14px;
+        }
+
+        .pulse {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #e74c3c;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Stream Recorder</h1>
+        
+        <form id="recorderForm">
+            <div class="form-group">
+                <label for="streamUrl">Stream URL</label>
+                <input 
+                    type="url" 
+                    id="streamUrl" 
+                    name="streamUrl" 
+                    placeholder="http://your-stream-server/stream"
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="name">Recording Name</label>
+                <input 
+                    type="text" 
+                    id="name" 
+                    name="name" 
+                    placeholder="morning_show"
+                    pattern="[a-zA-Z0-9]+"
+                    required
+                >
+                <div class="error-message" id="nameError">
+                    Name must contain only letters and numbers
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button type="button" id="startBtn" class="btn-start">Start Recording</button>
+                <button type="button" id="stopBtn" class="btn-stop" disabled>Stop Recording</button>
+            </div>
+        </form>
+
+        <div class="status" id="status"></div>
+
+        <div class="recording-info" id="recordingInfo">
+            <h3><span class="pulse"></span>Recording in Progress</h3>
+            <p><strong>Name:</strong> <span id="recordingName"></span></p>
+            <p><strong>Output:</strong> <span id="recordingOutput"></span></p>
+            <p><strong>Started:</strong> <span id="recordingStart"></span></p>
+        </div>
+    </div>
+
+    <script>
+        const streamUrlInput = document.getElementById('streamUrl');
+        const nameInput = document.getElementById('name');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDiv = document.getElementById('status');
+        const recordingInfo = document.getElementById('recordingInfo');
+        const nameError = document.getElementById('nameError');
+        
+        let currentRecordingName = null;
+        let statusCheckInterval = null;
+
+        // Validate name input (letters and numbers only)
+        nameInput.addEventListener('input', function() {
+            const value = this.value;
+            const isValid = /^[a-zA-Z0-9]*$/.test(value);
+            
+            if (value && !isValid) {
+                this.classList.add('error');
+                nameError.classList.add('show');
+            } else {
+                this.classList.remove('error');
+                nameError.classList.remove('show');
+            }
+        });
+
+        // Start recording
+        startBtn.addEventListener('click', async function() {
+            const streamUrl = streamUrlInput.value.trim();
+            const name = nameInput.value.trim();
+
+            // Validation
+            if (!streamUrl || !name) {
+                showStatus('Please fill in all fields', 'error');
+                return;
+            }
+
+            if (!/^[a-zA-Z0-9]+$/.test(name)) {
+                showStatus('Name must contain only letters and numbers', 'error');
+                nameInput.classList.add('error');
+                nameError.classList.add('show');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/record/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ streamUrl, name })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    currentRecordingName = name;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    streamUrlInput.disabled = true;
+                    nameInput.disabled = true;
+                    
+                    showStatus('Recording started successfully!', 'success');
+                    updateRecordingInfo(data);
+                    startStatusCheck();
+                } else {
+                    showStatus(data.error || 'Failed to start recording', 'error');
+                }
+            } catch (error) {
+                showStatus('Error: ' + error.message, 'error');
+            }
+        });
+
+        // Stop recording
+        stopBtn.addEventListener('click', async function() {
+            if (!currentRecordingName) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/record/stop', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ name: currentRecordingName })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showStatus('Recording stopped successfully!', 'success');
+                    resetUI();
+                } else {
+                    showStatus(data.error || 'Failed to stop recording', 'error');
+                }
+            } catch (error) {
+                showStatus('Error: ' + error.message, 'error');
+            }
+        });
+
+        // Check recording status
+        async function checkStatus() {
+            if (!currentRecordingName) return;
+
+            try {
+                const response = await fetch(`/api/record/status?name=${encodeURIComponent(currentRecordingName)}`);
+                const data = await response.json();
+
+                if (!data.active) {
+                    showStatus('Recording has stopped', 'info');
+                    resetUI();
+                }
+            } catch (error) {
+                console.error('Error checking status:', error);
+            }
+        }
+
+        function startStatusCheck() {
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+            }
+            statusCheckInterval = setInterval(checkStatus, 2000);
+        }
+
+        function stopStatusCheck() {
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+                statusCheckInterval = null;
+            }
+        }
+
+        function updateRecordingInfo(data) {
+            document.getElementById('recordingName').textContent = data.name;
+            document.getElementById('recordingOutput').textContent = data.outputPath;
+            document.getElementById('recordingStart').textContent = new Date().toLocaleString();
+            recordingInfo.classList.add('show');
+        }
+
+        function resetUI() {
+            currentRecordingName = null;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            streamUrlInput.disabled = false;
+            nameInput.disabled = false;
+            recordingInfo.classList.remove('show');
+            stopStatusCheck();
+        }
+
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type} show`;
+            
+            // Auto-hide success messages after 5 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    statusDiv.classList.remove('show');
+                }, 5000);
+            }
+        }
+
+        // Check for existing recording on page load
+        window.addEventListener('load', async function() {
+            try {
+                const response = await fetch('/api/record/status');
+                const data = await response.json();
+                
+                if (data.activeRecordings && data.activeRecordings.length > 0) {
+                    const recording = data.activeRecordings[0];
+                    currentRecordingName = recording.name;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    streamUrlInput.disabled = true;
+                    nameInput.disabled = false;
+                    nameInput.value = recording.name;
+                    streamUrlInput.value = recording.streamUrl;
+                    updateRecordingInfo(recording);
+                    startStatusCheck();
+                }
+            } catch (error) {
+                console.error('Error checking initial status:', error);
+            }
+        });
+    </script>
+</body>
+</html>
+

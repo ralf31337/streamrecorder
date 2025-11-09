@@ -1,9 +1,11 @@
 # SATIP Stream Recorder Dockerfile
-FROM python:3.11-slim
+FROM node:20-slim
 
-# Install ffmpeg
+# Install Python and ffmpeg
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -13,15 +15,24 @@ RUN mkdir -p /recordings
 # Set working directory
 WORKDIR /app
 
-# Copy recorder script
-COPY recorder.py /app/recorder.py
+# Copy package files and install Node.js dependencies
+COPY package.json /app/
+RUN npm install
 
-# Make script executable
+# Copy application files
+COPY server.js /app/
+COPY recorder.py /app/
+COPY public /app/public
+
+# Make scripts executable
 RUN chmod +x /app/recorder.py
 
-# Set entrypoint to Python script
-ENTRYPOINT ["python3", "/app/recorder.py"]
+# Expose web interface port
+EXPOSE 3000
 
 # Default output directory
 VOLUME ["/recordings"]
+
+# Start the web server
+CMD ["node", "server.js"]
 

@@ -1,22 +1,28 @@
 version: '3.8'
 
 services:
-  satip-recorder:
+  streamrecorder:
     build: .
-    image: satip-recorder:latest
-    container_name: satip-recorder
+    image: streamrecorder:latest
+    container_name: streamrecorder
     
     # Environment variables
     environment:
       - STREAM_URL=${STREAM_URL}
       - TIMEZONE=${TIMEZONE:-Europe/Vienna}
+      - OUTPUT_DIR=${OUTPUT_DIR:-/recordings}
+      - PORT=${PORT:-3000}
     
     # Volume mount for recordings
     volumes:
       - ./recordings:/recordings
     
-    # Restart policy: no (container should exit after recording)
-    restart: "no"
+    # Expose web interface port
+    ports:
+      - "${PORT:-3000}:3000"
+    
+    # Restart policy: always (web server should stay running)
+    restart: unless-stopped
     
     # Network mode: bridge (default)
     network_mode: bridge
@@ -28,10 +34,13 @@ services:
     #       cpus: '1.0'
     #       memory: 512M
 
-# Example usage:
-# Start with command-line arguments:
-#   docker compose run --rm satip-recorder 60 morning_show
+# Usage:
+# Start the web interface:
+#   docker compose up -d
 #
-# Or override command in docker compose:
-#   docker compose run --rm satip-recorder 120 evening_news
+# Access the web interface at:
+#   http://localhost:3000
+#
+# For command-line usage (legacy), you can still run:
+#   docker compose run --rm streamrecorder python3 /app/recorder.py 60 morning_show
 
