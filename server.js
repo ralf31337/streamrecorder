@@ -4,6 +4,7 @@ const { spawn, exec } = require('child_process');
 const { promisify } = require('util');
 const path = require('path');
 const fs = require('fs');
+const cron = require('node-cron');
 
 const execAsync = promisify(exec);
 
@@ -14,8 +15,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Path to persistence file
+// Path to persistence files
 const STATE_FILE = path.join(process.env.OUTPUT_DIR || '/recordings', '.recordings_state.json');
+const CRON_FILE = path.join(process.env.OUTPUT_DIR || '/recordings', 'cron.json');
+
+// Store active cron jobs
+const activeCronJobs = new Map();
 
 // Load persisted state from file
 function loadStateFile() {
@@ -164,6 +169,43 @@ function generateFilename(name) {
   return `streamrecording_${name}_${year}${month}${day}${hours}${minutes}${seconds}.mp3`;
 }
 
+// Create symbolic link in 'links' subdirectory (before recording starts)
+// Same as recorder.py: creates links/{name}.mp3 -> ../{filename}
+function createSymlink(outputDir, filename, name) {
+  try {
+    const linksDir = path.join(outputDir, 'links');
+    
+    // Create links directory if it doesn't exist
+    if (!fs.existsSync(linksDir)) {
+      fs.mkdirSync(linksDir, { recursive: true });
+    }
+    
+    // Symlink path: links/{name}.mp3
+    const symlinkPath = path.join(linksDir, `${name}.mp3`);
+    
+    // Remove existing symlink if it exists
+    try {
+      if (fs.existsSync(symlinkPath)) {
+        const stats = fs.lstatSync(symlinkPath);
+        if (stats.isSymbolicLink() || stats.isFile()) {
+          fs.unlinkSync(symlinkPath);
+        }
+      }
+    } catch (unlinkError) {
+      // Ignore errors when removing old symlink
+    }
+    
+    // Create symlink pointing to ../{filename} (the actual recording in parent directory)
+    const targetPath = path.join('..', filename);
+    fs.symlinkSync(targetPath, symlinkPath);
+    
+    console.log(`Symlink created: ${symlinkPath} -> ${targetPath}`);
+  } catch (error) {
+    // Don't fail the recording if symlink creation fails
+    console.warn(`Could not create symlink: ${error.message}`);
+  }
+}
+
 // Start recording endpoint
 app.post('/api/record/start', async (req, res) => {
   const { streamUrl, name } = req.body;
@@ -193,8 +235,12 @@ app.post('/api/record/start', async (req, res) => {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
+  // Create symbolic link before recording starts (same as recorder.py)
+  createSymlink(outputDir, filename, name);
+
   // Build ffmpeg command
   // Note: -flush_packets 1 and -fflags +flush_packets force immediate writing to disk
+  // Parameters match recorder.py: -re, -i, -vn, -acodec libmp3lame, -ar 48000, -b:a 192k, -f mp3
   const ffmpegCmd = [
     'ffmpeg',
     '-re',
@@ -356,12 +402,290 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// ==================== CRON SCHEDULER ====================
+
+// Load cron schedule from file
+function loadCronSchedule() {
+  try {
+    if (fs.existsSync(CRON_FILE)) {
+      const data = fs.readFileSync(CRON_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Error loading cron schedule:', error);
+  }
+  return { jobs: [] };
+}
+
+// Save cron schedule to file
+function saveCronSchedule(schedule) {
+  try {
+    fs.writeFileSync(CRON_FILE, JSON.stringify(schedule, null, 2));
+  } catch (error) {
+    console.error('Error saving cron schedule:', error);
+  }
+}
+
+// Start a recording (used by cron jobs)
+async function startRecordingFromCron(streamUrl, name, durationMinutes = null) {
+  try {
+    // Check if already recording with this name
+    const activeRecordings = await getActiveRecordings();
+    if (activeRecordings.some(r => r.name === name)) {
+      console.log(`Cron: Recording "${name}" already in progress, skipping`);
+      return;
+    }
+
+    // Generate output filename
+    const outputDir = process.env.OUTPUT_DIR || '/recordings';
+    const filename = generateFilename(name);
+    const outputPath = path.join(outputDir, filename);
+
+    // Ensure output directory exists
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    // Create symbolic link before recording starts (same as recorder.py)
+    createSymlink(outputDir, filename, name);
+
+    // Build ffmpeg command
+    // Parameters match recorder.py: -re, -i, -t (if duration), -vn, -acodec libmp3lame, -ar 48000, -b:a 192k, -f mp3
+    const ffmpegCmd = [
+      'ffmpeg',
+      '-re',
+      '-i', streamUrl
+    ];
+
+    // Add duration limit if specified (same position as recorder.py: before -vn)
+    if (durationMinutes && durationMinutes > 0) {
+      const durationSeconds = durationMinutes * 60;
+      ffmpegCmd.push('-t', String(durationSeconds));
+      console.log(`Cron: Recording "${name}" will stop automatically after ${durationMinutes} minutes`);
+    }
+
+    ffmpegCmd.push(
+      '-vn',
+      '-acodec', 'libmp3lame',
+      '-ar', '48000',
+      '-b:a', '192k',
+      '-f', 'mp3',
+      '-fflags', '+flush_packets',
+      '-flush_packets', '1',
+      outputPath
+    );
+
+    // Spawn ffmpeg process
+    const ffmpegProcess = spawn(ffmpegCmd[0], ffmpegCmd.slice(1), {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true
+    });
+    ffmpegProcess.unref();
+
+    // Store in state file
+    const startTime = new Date();
+    const stateRecordings = loadStateFile();
+    stateRecordings.push({
+      name: name,
+      outputPath: outputPath,
+      startTime: startTime.toISOString(),
+      streamUrl: streamUrl,
+      pid: ffmpegProcess.pid,
+      durationMinutes: durationMinutes || null
+    });
+    saveStateFile(stateRecordings);
+
+    console.log(`Cron: Started recording "${name}" (PID ${ffmpegProcess.pid})${durationMinutes ? `, duration: ${durationMinutes} minutes` : ', no duration limit'}`);
+  } catch (error) {
+    console.error(`Cron: Error starting recording "${name}":`, error);
+  }
+}
+
+// Schedule a cron job
+function scheduleCronJob(jobId, cronExpression, streamUrl, name, durationMinutes = null) {
+  // Validate cron expression
+  if (!cron.validate(cronExpression)) {
+    throw new Error(`Invalid cron expression: ${cronExpression}`);
+  }
+
+  // Stop existing job if any
+  if (activeCronJobs.has(jobId)) {
+    activeCronJobs.get(jobId).stop();
+    activeCronJobs.delete(jobId);
+  }
+
+  // Create new cron job
+  const task = cron.schedule(cronExpression, () => {
+    console.log(`Cron job "${jobId}" triggered: starting recording "${name}"${durationMinutes ? ` for ${durationMinutes} minutes` : ''}`);
+    startRecordingFromCron(streamUrl, name, durationMinutes);
+  }, {
+    scheduled: true,
+    timezone: process.env.TIMEZONE || 'Europe/Vienna'
+  });
+
+  activeCronJobs.set(jobId, task);
+  console.log(`Scheduled cron job "${jobId}": ${cronExpression} -> ${name}`);
+  console.log(`  Timezone: ${process.env.TIMEZONE || 'Europe/Vienna'}`);
+  console.log(`  Next run will be calculated by node-cron`);
+  
+  // Test if the task is actually scheduled
+  if (!task) {
+    console.error(`ERROR: Failed to create cron task for job "${jobId}"`);
+  } else {
+    console.log(`  Cron task created successfully for job "${jobId}"`);
+  }
+}
+
+// Load and start all cron jobs on startup
+function loadAndStartCronJobs() {
+  const schedule = loadCronSchedule();
+  console.log(`Loading ${schedule.jobs.length} cron job(s) from ${CRON_FILE}`);
+  
+  if (schedule.jobs.length === 0) {
+    console.log('No cron jobs found in schedule');
+    return;
+  }
+  
+  schedule.jobs.forEach(job => {
+    try {
+      const durationMinutes = job.durationMinutes || null;
+      console.log(`Attempting to schedule job "${job.id}" with cron "${job.cron}"${durationMinutes ? `, duration: ${durationMinutes} minutes` : ', no duration limit'}`);
+      scheduleCronJob(job.id, job.cron, job.streamUrl, job.name, durationMinutes);
+    } catch (error) {
+      console.error(`Error scheduling cron job "${job.id}":`, error);
+      console.error(`  Cron expression: ${job.cron}`);
+      console.error(`  Error details:`, error.message);
+    }
+  });
+  
+  console.log(`Total active cron jobs: ${activeCronJobs.size}`);
+}
+
+// API: Get cron schedule
+app.get('/api/cron', (req, res) => {
+  const schedule = loadCronSchedule();
+  res.json(schedule);
+});
+
+// API: Add/Update cron job
+app.post('/api/cron', (req, res) => {
+  const { id, cron: cronExpression, streamUrl, name, durationMinutes } = req.body;
+
+  if (!id || !cronExpression || !streamUrl || !name) {
+    return res.status(400).json({ error: 'id, cron, streamUrl, and name are required' });
+  }
+
+  if (!validateName(name)) {
+    return res.status(400).json({ error: 'Name must contain only letters and numbers' });
+  }
+
+  // Validate duration if provided
+  const duration = durationMinutes ? parseInt(durationMinutes) : null;
+  if (durationMinutes !== undefined && durationMinutes !== null) {
+    if (isNaN(duration) || duration <= 0) {
+      return res.status(400).json({ error: 'durationMinutes must be a positive number' });
+    }
+  }
+
+  try {
+    // Validate cron expression
+    if (!cron.validate(cronExpression)) {
+      return res.status(400).json({ error: `Invalid cron expression: ${cronExpression}` });
+    }
+
+    // Load current schedule
+    const schedule = loadCronSchedule();
+    
+    // Update or add job
+    const existingIndex = schedule.jobs.findIndex(j => j.id === id);
+    const job = { 
+      id, 
+      cron: cronExpression, 
+      streamUrl, 
+      name,
+      durationMinutes: duration
+    };
+    
+    if (existingIndex >= 0) {
+      schedule.jobs[existingIndex] = job;
+    } else {
+      schedule.jobs.push(job);
+    }
+
+    // Save and schedule
+    saveCronSchedule(schedule);
+    scheduleCronJob(id, cronExpression, streamUrl, name, duration);
+
+    res.json({ success: true, message: 'Cron job saved and scheduled', job });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Delete cron job
+app.delete('/api/cron/:id', (req, res) => {
+  const { id } = req.params;
+
+  // Stop the cron job
+  if (activeCronJobs.has(id)) {
+    activeCronJobs.get(id).stop();
+    activeCronJobs.delete(id);
+  }
+
+  // Remove from schedule
+  const schedule = loadCronSchedule();
+  schedule.jobs = schedule.jobs.filter(j => j.id !== id);
+  saveCronSchedule(schedule);
+
+  res.json({ success: true, message: 'Cron job deleted' });
+});
+
+// API: Test/Trigger cron job manually (for debugging)
+app.get('/api/cron/:id/test', (req, res) => {
+  const { id } = req.params;
+  const schedule = loadCronSchedule();
+  const job = schedule.jobs.find(j => j.id === id);
+
+  if (!job) {
+    return res.status(404).json({ error: 'Cron job not found' });
+  }
+
+  console.log(`Manual trigger of cron job "${id}"`);
+  const durationMinutes = job.durationMinutes || null;
+  startRecordingFromCron(job.streamUrl, job.name, durationMinutes).then(() => {
+    res.json({ success: true, message: `Manually triggered recording "${job.name}"${durationMinutes ? ` for ${durationMinutes} minutes` : ''}` });
+  }).catch(error => {
+    res.status(500).json({ error: error.message });
+  });
+});
+
+// API: Get cron job status
+app.get('/api/cron/status', (req, res) => {
+  const schedule = loadCronSchedule();
+  const status = {
+    totalJobs: schedule.jobs.length,
+    activeJobs: activeCronJobs.size,
+    jobs: schedule.jobs.map(job => ({
+      id: job.id,
+      name: job.name,
+      cron: job.cron,
+      isActive: activeCronJobs.has(job.id)
+    }))
+  };
+  res.json(status);
+});
+
+// ==================== END CRON SCHEDULER ====================
+
 // Sync state on startup
 syncStateWithPs().then(() => {
   console.log('State synchronized with running processes');
 }).catch(err => {
   console.error('Error syncing state on startup:', err);
 });
+
+// Load and start cron jobs on startup
+loadAndStartCronJobs();
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Stream Recorder Web Interface running on port ${PORT}`);

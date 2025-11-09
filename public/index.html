@@ -191,6 +191,83 @@
             transform: translateY(-1px);
         }
 
+        .cron-job-item {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #28a745;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 15px;
+        }
+
+        .cron-job-item .cron-info {
+            flex: 1;
+            min-width: 0; /* Allows text to wrap */
+        }
+
+        .cron-job-item .cron-info h4 {
+            margin: 0 0 8px 0;
+            color: #333;
+            font-size: 1.1em;
+        }
+
+        .cron-job-item .cron-info p {
+            margin: 4px 0;
+            color: #666;
+            font-size: 14px;
+            word-break: break-all; /* Break long URLs */
+            overflow-wrap: break-word;
+        }
+
+        .cron-job-item .cron-actions {
+            display: flex;
+            gap: 10px;
+            flex-shrink: 0; /* Prevent buttons from shrinking */
+        }
+
+        .cron-job-item .edit-btn {
+            padding: 8px 16px;
+            font-size: 14px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .cron-job-item .edit-btn:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+        }
+
+        .cron-job-item .delete-btn {
+            padding: 8px 16px;
+            font-size: 14px;
+            background: #f5576c;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .cron-job-item .delete-btn:hover {
+            background: #e63950;
+            transform: translateY(-1px);
+        }
+
+        code {
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
         .pulse {
             display: inline-block;
             width: 10px;
@@ -254,6 +331,54 @@
             <div id="activeRecordingsList"></div>
             <button type="button" id="stopAllBtn" class="btn-stop" style="margin-top: 15px; width: 100%;">Stop All Recordings</button>
         </div>
+
+        <div id="cronSection" style="margin-top: 40px;">
+            <h2 style="margin-bottom: 20px; color: #333;">📅 Scheduled Recordings (Cron)</h2>
+            
+            <button type="button" id="addCronBtn" class="btn-start" style="margin-bottom: 20px;">+ Add Scheduled Recording</button>
+            
+            <div id="cronJobsList"></div>
+
+            <div id="cronFormModal" style="display: none; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 2px solid #667eea;">
+                <h3 style="margin-top: 0; color: #333;" id="cronFormTitle">Add Scheduled Recording</h3>
+                <form id="cronForm">
+                    <div class="form-group">
+                        <label for="cronId">Job ID</label>
+                        <input type="text" id="cronId" name="cronId" placeholder="morning_show" pattern="[a-zA-Z0-9]+" required>
+                        <div class="error-message" id="cronIdError">ID must contain only letters and numbers</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="cronStreamUrl">Stream URL</label>
+                        <input type="url" id="cronStreamUrl" name="cronStreamUrl" placeholder="http://your-stream-server/stream" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="cronName">Recording Name</label>
+                        <input type="text" id="cronName" name="cronName" placeholder="morning_show" pattern="[a-zA-Z0-9]+" required>
+                        <div class="error-message" id="cronNameError">Name must contain only letters and numbers</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="cronExpression">Cron Expression</label>
+                        <input type="text" id="cronExpression" name="cronExpression" placeholder="0 8 * * *" required>
+                        <small style="color: #666; display: block; margin-top: 5px;">
+                            Format: minute hour day month weekday<br>
+                            Examples: <code>0 8 * * *</code> (daily at 8 AM), <code>0 20 * * *</code> (daily at 8 PM), <code>0 18 * * 1-5</code> (weekdays at 6 PM)
+                        </small>
+                        <div class="error-message" id="cronExpressionError">Invalid cron expression</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="cronDuration">Duration (minutes)</label>
+                        <input type="number" id="cronDuration" name="cronDuration" placeholder="60" min="1" step="1">
+                        <small style="color: #666; display: block; margin-top: 5px;">
+                            Recording will automatically stop after this many minutes. Leave empty for unlimited duration.
+                        </small>
+                    </div>
+                    <div class="button-group">
+                        <button type="submit" class="btn-start">Save</button>
+                        <button type="button" id="cancelCronBtn" class="btn-stop">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -265,8 +390,16 @@
         const activeRecordingsList = document.getElementById('activeRecordingsList');
         const stopAllBtn = document.getElementById('stopAllBtn');
         const nameError = document.getElementById('nameError');
+        const cronSection = document.getElementById('cronSection');
+        const cronJobsList = document.getElementById('cronJobsList');
+        const addCronBtn = document.getElementById('addCronBtn');
+        const cronFormModal = document.getElementById('cronFormModal');
+        const cronForm = document.getElementById('cronForm');
+        const cronFormTitle = document.getElementById('cronFormTitle');
+        const cancelCronBtn = document.getElementById('cancelCronBtn');
         
         let statusCheckInterval = null;
+        let editingCronId = null;
 
         // Validate name input (letters and numbers only)
         nameInput.addEventListener('input', function() {
@@ -452,9 +585,210 @@
             }
         }
 
+        // ==================== CRON MANAGEMENT ====================
+
+        // Load and display cron jobs
+        async function refreshCronJobs() {
+            try {
+                const response = await fetch('/api/cron');
+                const data = await response.json();
+                const jobs = data.jobs || [];
+
+                if (jobs.length === 0) {
+                    cronJobsList.innerHTML = '<p style="color: #666; font-style: italic;">No scheduled recordings. Click "Add Scheduled Recording" to create one.</p>';
+                } else {
+                    cronJobsList.innerHTML = '';
+                    jobs.forEach(job => {
+                        const item = document.createElement('div');
+                        item.className = 'cron-job-item';
+                        const durationText = job.durationMinutes ? `${job.durationMinutes} minutes` : 'Unlimited';
+                        item.innerHTML = `
+                            <div class="cron-info">
+                                <h4>${job.name} (${job.id})</h4>
+                                <p><strong>Cron:</strong> <code>${job.cron}</code></p>
+                                <p><strong>Duration:</strong> ${durationText}</p>
+                                <p><strong>Stream URL:</strong> ${job.streamUrl}</p>
+                            </div>
+                            <div class="cron-actions">
+                                <button class="edit-btn" onclick="editCronJob('${job.id}')">Edit</button>
+                                <button class="delete-btn" onclick="deleteCronJob('${job.id}')">Delete</button>
+                            </div>
+                        `;
+                        cronJobsList.appendChild(item);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading cron jobs:', error);
+                showStatus('Error loading scheduled recordings', 'error');
+            }
+        }
+
+        // Show add cron form
+        addCronBtn.addEventListener('click', function() {
+            editingCronId = null;
+            cronFormTitle.textContent = 'Add Scheduled Recording';
+            cronForm.reset();
+            document.getElementById('cronId').disabled = false; // Enable ID field for new jobs
+            cronFormModal.style.display = 'block';
+            addCronBtn.style.display = 'none';
+        });
+
+        // Cancel cron form
+        cancelCronBtn.addEventListener('click', function() {
+            cronFormModal.style.display = 'none';
+            addCronBtn.style.display = 'block';
+            editingCronId = null;
+            cronForm.reset();
+            document.getElementById('cronId').disabled = false; // Re-enable ID field
+        });
+
+        // Validate cron ID and name inputs
+        document.getElementById('cronId').addEventListener('input', function() {
+            const value = this.value;
+            const isValid = /^[a-zA-Z0-9]*$/.test(value);
+            const errorDiv = document.getElementById('cronIdError');
+            if (value && !isValid) {
+                this.classList.add('error');
+                errorDiv.classList.add('show');
+            } else {
+                this.classList.remove('error');
+                errorDiv.classList.remove('show');
+            }
+        });
+
+        document.getElementById('cronName').addEventListener('input', function() {
+            const value = this.value;
+            const isValid = /^[a-zA-Z0-9]*$/.test(value);
+            const errorDiv = document.getElementById('cronNameError');
+            if (value && !isValid) {
+                this.classList.add('error');
+                errorDiv.classList.add('show');
+            } else {
+                this.classList.remove('error');
+                errorDiv.classList.remove('show');
+            }
+        });
+
+        // Submit cron form
+        cronForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const id = document.getElementById('cronId').value.trim();
+            const streamUrl = document.getElementById('cronStreamUrl').value.trim();
+            const name = document.getElementById('cronName').value.trim();
+            const cronExpression = document.getElementById('cronExpression').value.trim();
+            const durationMinutes = document.getElementById('cronDuration').value.trim();
+
+            // Validation
+            if (!id || !streamUrl || !name || !cronExpression) {
+                showStatus('Please fill in all fields', 'error');
+                return;
+            }
+
+            if (!/^[a-zA-Z0-9]+$/.test(id)) {
+                showStatus('Job ID must contain only letters and numbers', 'error');
+                return;
+            }
+
+            if (!/^[a-zA-Z0-9]+$/.test(name)) {
+                showStatus('Recording name must contain only letters and numbers', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/cron', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        id: id,
+                        cron: cronExpression,
+                        streamUrl: streamUrl,
+                        name: name,
+                        durationMinutes: durationMinutes ? parseInt(durationMinutes) : null
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showStatus(editingCronId ? 'Scheduled recording updated!' : 'Scheduled recording added!', 'success');
+                    await refreshCronJobs();
+                    cronFormModal.style.display = 'none';
+                    addCronBtn.style.display = 'block';
+                    cronForm.reset();
+                    document.getElementById('cronId').disabled = false; // Re-enable ID field
+                    editingCronId = null;
+                } else {
+                    showStatus(data.error || 'Failed to save scheduled recording', 'error');
+                }
+            } catch (error) {
+                showStatus('Error: ' + error.message, 'error');
+            }
+        });
+
+        // Edit cron job
+        async function editCronJob(id) {
+            try {
+                const response = await fetch('/api/cron');
+                const data = await response.json();
+                const job = data.jobs.find(j => j.id === id);
+
+                if (!job) {
+                    showStatus('Scheduled recording not found', 'error');
+                    return;
+                }
+
+                editingCronId = id;
+                cronFormTitle.textContent = 'Edit Scheduled Recording';
+                document.getElementById('cronId').value = job.id;
+                document.getElementById('cronId').disabled = true; // Don't allow changing ID
+                document.getElementById('cronStreamUrl').value = job.streamUrl;
+                document.getElementById('cronName').value = job.name;
+                document.getElementById('cronExpression').value = job.cron;
+                document.getElementById('cronDuration').value = job.durationMinutes || '';
+                cronFormModal.style.display = 'block';
+                addCronBtn.style.display = 'none';
+            } catch (error) {
+                showStatus('Error loading scheduled recording: ' + error.message, 'error');
+            }
+        }
+
+        // Delete cron job
+        async function deleteCronJob(id) {
+            if (!confirm(`Are you sure you want to delete the scheduled recording "${id}"?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/cron/${id}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showStatus('Scheduled recording deleted', 'success');
+                    await refreshCronJobs();
+                } else {
+                    showStatus(data.error || 'Failed to delete scheduled recording', 'error');
+                }
+            } catch (error) {
+                showStatus('Error: ' + error.message, 'error');
+            }
+        }
+
+        // Make functions available globally for onclick handlers
+        window.editCronJob = editCronJob;
+        window.deleteCronJob = deleteCronJob;
+
+        // ==================== END CRON MANAGEMENT ====================
+
         // Check for existing recordings on page load
         window.addEventListener('load', async function() {
             await refreshRecordings();
+            await refreshCronJobs();
             startStatusCheck();
         });
 

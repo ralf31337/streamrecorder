@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   streamrecorder:
     build: .
@@ -14,8 +12,9 @@ services:
       - PORT=${PORT:-3000}
     
     # Volume mount for recordings
+    # Uses RECORDINGS_PATH from .env file, defaults to ./recordings if not set
     volumes:
-      - ./recordings:/recordings
+      - "${RECORDINGS_PATH:-./recordings}:/recordings"
     
     # Expose web interface port
     ports:
