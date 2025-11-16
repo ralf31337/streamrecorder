@@ -1,11 +1,9 @@
 # SATIP Stream Recorder Dockerfile
 FROM node:20-slim
 
-# Install Python, ffmpeg, and procps (for ps command)
+# Install ffmpeg and procps (for ps command)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
     ffmpeg \
     procps \
     && rm -rf /var/lib/apt/lists/*
@@ -22,11 +20,7 @@ RUN npm install
 
 # Copy application files
 COPY server.js /app/
-COPY recorder.py /app/
 COPY public /app/public
-
-# Make scripts executable
-RUN chmod +x /app/recorder.py
 
 # Expose web interface port
 EXPOSE 3000

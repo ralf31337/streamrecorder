@@ -39,7 +39,4 @@ services:
 #
 # Access the web interface at:
 #   http://localhost:3000
-#
-# For command-line usage (legacy), you can still run:
-#   docker compose run --rm streamrecorder python3 /app/recorder.py 60 morning_show
 

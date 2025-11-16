@@ -1,6 +1,6 @@
 # SATIP Stream Recorder
 
-A Docker container for recording SATIP streams to MP3 files using ffmpeg. Features both a **web interface** for interactive recording control and a **command-line interface** for scheduled/cron-based recordings.
+A Docker container for recording SATIP streams to MP3 files using ffmpeg. Features a **web interface** for interactive recording control and **cron-based scheduling** via the built-in scheduler.
 
 ## Features
 
@@ -10,7 +10,7 @@ A Docker container for recording SATIP streams to MP3 files using ffmpeg. Featur
 - 📁 **Automatic Filename Generation**: Files named `streamrecording_<name>_YYYYMMDDHHMMSS.mp3`
 - 🔄 **Real-time Status**: Live updates of active recordings with duration tracking
 - 🛡️ **Input Validation**: Name field restricted to letters and numbers only (regex: `[a-zA-Z0-9]+`)
-- 📜 **Legacy CLI Support**: Original command-line interface still available for cron jobs
+- ⏰ **Built-in Cron Scheduler**: Schedule recordings via web interface or cron.json file
 
 ## Quick Start
 
@@ -30,20 +30,13 @@ The web interface allows you to:
 - View all active recordings with real-time duration
 - Stop individual recordings or all at once
 
-### Command-Line Mode (Legacy/Cron)
+### Scheduled Recordings (Cron)
 
-For scheduled recordings via cron, use the original CLI:
+The web interface includes a built-in cron scheduler. You can schedule recordings via:
+- **Web Interface**: Use the cron scheduler UI to add/edit/delete scheduled recordings
+- **Cron JSON File**: Manually edit `/recordings/cron.json` in the container or mounted volume
 
-```bash
-docker run --rm \
-  --user 568:568 \
-  -e STREAM_URL="http://your-satip-server/?params" \
-  -e TIMEZONE="Europe/Vienna" \
-  -v /mnt/poolname/datasetname/recordings:/recordings \
-  ghcr.io/ralf31337/streamrecorder:latest python3 /app/recorder.py 60 morning_show
-```
-
-**Note:** The container now runs as a web server by default. For CLI usage, override the command as shown above.
+Scheduled recordings are stored in `cron.json` and persist across container restarts.
 
 ## Architecture & How It Works
 
@@ -120,24 +113,9 @@ Files are named: `streamrecording_<name>_YYYYMMDDHHMMSS.mp3`
 
 ## Usage
 
-### Web Interface Usage
+### Scheduled Recordings via Cron
 
-```bash
-docker run --rm \
-  --user 568:568 \
-  -e STREAM_URL="http://your-satip-server/?params" \
-  -e TIMEZONE="Europe/Vienna" \
-  -v /mnt/poolname/datasetname/recordings:/recordings \
-  ghcr.io/ralf31337/streamrecorder:latest DURATION PREFIX
-```
-
-**Arguments:**
-- `DURATION` - Recording duration in minutes
-- `PREFIX` - Filename prefix (e.g., "morning_show")
-
-**Output Files:**
-- `PREFIX_YYYYMMDD_HHMMSS.mp3` - Timestamped recording
-- `links/PREFIX.mp3` - Symlink to the latest recording (useful for SMB access)
+The web interface includes a built-in cron scheduler that allows you to schedule recordings. Scheduled recordings are managed through the web interface or by editing the `cron.json` file directly.
 
 ### Web Interface API Endpoints
 
@@ -195,18 +173,12 @@ sudo chown -R 568:568 /mnt/poolname/datasetname/recordings
 sudo chmod -R 755 /mnt/poolname/datasetname/recordings
 ```
 
-### 3. Test Recording via Shell
+### 3. Test Recording via Web Interface
 
-Open shell on TrueNAS and run:
-
-```bash
-sudo docker run --rm \
-  --user 568:568 \
-  -e STREAM_URL="http://your-satip-server/?src=1&freq=11053&pol=h&ro=0.35&msys=dvbs2&mtype=8psk&plts=off&sr=22000&fec=34&sid=28429&pids=0,18,120,121" \
-  -e TIMEZONE="Europe/Vienna" \
-  -v /mnt/poolname/datasetname/recordings:/recordings \
-  ghcr.io/ralf31337/streamrecorder:latest 1 test
-```
+1. Access the web interface at `http://your-truenas-ip:3000`
+2. Enter your stream URL and a test name (e.g., "test")
+3. Click "Start Recording"
+4. Wait a few seconds, then check the recordings directory
 
 Check for the test file:
 ```bash
@@ -214,53 +186,69 @@ ls -lh /mnt/poolname/datasetname/recordings/
 ls -lh /mnt/poolname/datasetname/recordings/links/
 ```
 
-If you see a file like `test_YYYYMMDD_HHMMSS.mp3` and a symlink `links/test.mp3`, permissions are correct!
+If you see a file like `streamrecording_test_YYYYMMDDHHMMSS.mp3` and a symlink `links/test.mp3`, permissions are correct!
 
-### 5. Set Up Cron Jobs
+### 5. Set Up Scheduled Recordings
 
-In TrueNAS web interface:
+You can schedule recordings in two ways:
 
-1. Go to **System Settings** → **Advanced** → **Cron Jobs**
-2. Click **Add**
-3. Configure:
-   - **Description:** Record Morning Show
-   - **Command:** 
-     ```
-     /usr/bin/docker run --rm --user 568:568 -e STREAM_URL="http://your-satip-server/?params" -e TIMEZONE="Europe/Vienna" -v /mnt/poolname/datasetname/recordings:/recordings ghcr.io/ralf31337/streamrecorder:latest 60 morning_show
-     ```
-   - **Schedule:** Custom → `0 8 * * *` (daily at 8:00 AM)
-   - **User:** root
-   - **Enable:** ✓
+#### Option A: Via Web Interface (Recommended)
 
-**Important:** 
-- Cron must run as `root` to access Docker, but the container runs as user 568 (apps) for security
-- The image is already cached from your app install (Step 3), so no re-download happens
-- To update the image, just update the app in TrueNAS UI - your cron jobs will automatically use the new version
+1. Access the web interface at `http://your-truenas-ip:3000`
+2. Navigate to the Cron Scheduler section
+3. Click "Add Cron Job"
+4. Configure:
+   - **ID:** Unique identifier (e.g., "morning_show")
+   - **Cron Expression:** `0 8 * * *` (daily at 8:00 AM)
+   - **Stream URL:** Your SATIP stream URL
+   - **Name:** Recording name (e.g., "morning_show")
+   - **Duration (optional):** Minutes to record (leave empty for unlimited)
+5. Click "Save"
+
+#### Option B: Via Cron JSON File
+
+Edit `/mnt/poolname/datasetname/recordings/cron.json`:
+
+```json
+{
+  "jobs": [
+    {
+      "id": "morning_show",
+      "cron": "0 8 * * *",
+      "streamUrl": "http://your-satip-server/?params",
+      "name": "morning_show",
+      "durationMinutes": 60
+    }
+  ]
+}
+```
+
+The container will automatically load and schedule these jobs on startup.
 
 ### Example Cron Schedules
 
-| Description | Cron Expression | Example Command |
-|-------------|----------------|-----------------|
-| Daily at 8 AM | `0 8 * * *` | ...60 morning_show |
-| Daily at 8 PM | `0 20 * * *` | ...30 evening_news |
-| Weekdays at 6 PM | `0 18 * * 1-5` | ...60 weekday_show |
-| Saturdays at 10 AM | `0 10 * * 6` | ...120 weekend_special |
+| Description | Cron Expression |
+|-------------|----------------|
+| Daily at 8 AM | `0 8 * * *` |
+| Daily at 8 PM | `0 20 * * *` |
+| Weekdays at 6 PM | `0 18 * * 1-5` |
+| Saturdays at 10 AM | `0 10 * * 6` |
 
 ### View Cron Logs
 
 ```bash
-# SSH into TrueNAS
-journalctl -u cron -n 50 --no-pager
+# View container logs
+docker logs streamrecorder
 
-# Or search syslog
-grep CRON /var/log/syslog | tail -20
+# Follow logs in real-time
+docker logs -f streamrecorder
 ```
 
 ## Environment Variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `STREAM_URL` | Yes* | - | SATIP stream URL (*required for CLI mode, optional for web mode) |
+| `STREAM_URL` | No | - | Default SATIP stream URL (can be overridden per recording) |
 | `TIMEZONE` | No | Europe/Vienna | IANA timezone for timestamps (with DST support) |
 | `OUTPUT_DIR` | No | `/recordings` | Directory where recordings are saved |
 | `PORT` | No | `3000` | Port for web interface |
@@ -317,7 +305,6 @@ The symlink in the `links` folder is automatically updated after each successful
 
 ### Container Behavior
 - **Web Mode:** Runs as persistent service (restart: `unless-stopped`)
-- **CLI Mode:** Runs once and exits (restart: `no`)
 - **Default User:** UID 568 (TrueNAS apps user) - set via docker-compose or `--user` flag
 
 ## Rainy Day Scenarios & Edge Cases
@@ -540,7 +527,7 @@ sudo chmod -R 755 /mnt/poolname/datasetname/recordings
 
 ### Wrong Timestamp
 
-Verify timezone: `docker run --rm --user 568:568 -e TIMEZONE="Europe/Vienna" ghcr.io/ralf31337/streamrecorder:latest --help`
+Verify timezone is set correctly in environment variables or via the web interface.
 
 ### State File Issues
 
@@ -577,10 +564,10 @@ services:
     restart: unless-stopped  # Keeps service running
 ```
 
-**Key Differences from CLI Mode:**
-- `restart: unless-stopped` (vs `restart: "no"` for CLI)
+**Key Features:**
+- `restart: unless-stopped` keeps the service running
 - Port mapping for web interface
-- No command override (uses default CMD from Dockerfile)
+- Built-in cron scheduler for scheduled recordings
 
 ## License
 

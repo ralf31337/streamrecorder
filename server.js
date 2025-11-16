@@ -170,7 +170,7 @@ function generateFilename(name) {
 }
 
 // Create symbolic link in 'links' subdirectory (before recording starts)
-// Same as recorder.py: creates links/{name}.mp3 -> ../{filename}
+// Creates links/{name}.mp3 -> ../{filename}
 function createSymlink(outputDir, filename, name) {
   try {
     const linksDir = path.join(outputDir, 'links');
@@ -235,12 +235,12 @@ app.post('/api/record/start', async (req, res) => {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
-  // Create symbolic link before recording starts (same as recorder.py)
+  // Create symbolic link before recording starts
   createSymlink(outputDir, filename, name);
 
   // Build ffmpeg command
   // Note: -flush_packets 1 and -fflags +flush_packets force immediate writing to disk
-  // Parameters match recorder.py: -re, -i, -vn, -acodec libmp3lame, -ar 48000, -b:a 192k, -f mp3
+  // Parameters: -re, -i, -vn, -acodec libmp3lame, -ar 48000, -b:a 192k, -f mp3
   const ffmpegCmd = [
     'ffmpeg',
     '-re',
@@ -446,18 +446,18 @@ async function startRecordingFromCron(streamUrl, name, durationMinutes = null) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
 
-    // Create symbolic link before recording starts (same as recorder.py)
+    // Create symbolic link before recording starts
     createSymlink(outputDir, filename, name);
 
     // Build ffmpeg command
-    // Parameters match recorder.py: -re, -i, -t (if duration), -vn, -acodec libmp3lame, -ar 48000, -b:a 192k, -f mp3
+    // Parameters: -re, -i, -t (if duration), -vn, -acodec libmp3lame, -ar 48000, -b:a 192k, -f mp3
     const ffmpegCmd = [
       'ffmpeg',
       '-re',
       '-i', streamUrl
     ];
 
-    // Add duration limit if specified (same position as recorder.py: before -vn)
+    // Add duration limit if specified (before -vn)
     if (durationMinutes && durationMinutes > 0) {
       const durationSeconds = durationMinutes * 60;
       ffmpegCmd.push('-t', String(durationSeconds));
