@@ -63,6 +63,12 @@ async function getRunningFfmpegProcesses() {
       if (match) {
         const pid = parseInt(match[1]);
         const args = match[2];
+        
+        // Verify it's actually an ffmpeg process (not just grep matching)
+        if (!args.includes('ffmpeg') || args.includes('grep')) {
+          continue;
+        }
+        
         // Extract output file path from ffmpeg command
         const outputMatch = args.match(/streamrecording_([^_\s]+)_\d+\.mp3/);
         if (outputMatch) {
@@ -95,35 +101,31 @@ async function syncStateWithPs() {
   const runningProcesses = await getRunningFfmpegProcesses();
   const stateRecordings = loadStateFile();
   
-  const runningPids = new Set(runningProcesses.map(p => p.pid));
-  const statePids = new Set(stateRecordings.map(r => r.pid));
+  // Create a map of PID -> process info for quick lookup
+  const runningProcessMap = new Map();
+  runningProcesses.forEach(proc => {
+    runningProcessMap.set(proc.pid, proc);
+  });
   
-  // Kill processes that are running but not in state file (orphaned)
-  for (const proc of runningProcesses) {
-    if (!statePids.has(proc.pid)) {
-      console.log(`⚠️  Found orphaned ffmpeg process (PID ${proc.pid}), killing it...`);
-      try {
-        process.kill(proc.pid, 'SIGTERM');
-        setTimeout(() => {
-          try {
-            process.kill(proc.pid, 'SIGKILL');
-          } catch (e) {
-            // Process already dead
-          }
-        }, 2000);
-      } catch (error) {
-        console.error(`Error killing orphaned process ${proc.pid}:`, error);
-      }
-    }
-  }
-  
-  // Remove state entries for processes that no longer exist
+  // Remove state entries for processes that no longer exist OR don't match
   const cleanedRecordings = stateRecordings.filter(recording => {
-    const stillRunning = runningPids.has(recording.pid);
-    if (!stillRunning) {
+    const runningProc = runningProcessMap.get(recording.pid);
+    
+    if (!runningProc) {
+      // PID not found in ps output - process has stopped
       console.log(`✓ Process ${recording.pid} (${recording.name}) is no longer running, removing from state.`);
+      return false;
     }
-    return stillRunning;
+    
+    // Verify the process actually matches our recording (by name extracted from command line)
+    if (runningProc.name !== recording.name) {
+      // PID exists but belongs to a different recording - process has stopped and PID was reused
+      console.log(`✓ Process ${recording.pid} (${recording.name}) PID was reused, removing from state.`);
+      return false;
+    }
+    
+    // Process is still running and matches
+    return true;
   });
   
   // Update state file if it changed
