@@ -452,30 +452,29 @@ async function startRecordingFromCron(streamUrl, name, durationMinutes = null) {
     createSymlink(outputDir, filename, name);
 
     // Build ffmpeg command
-    // Parameters: -re, -i, -t (if duration), -vn, -acodec libmp3lame, -ar 48000, -b:a 192k, -f mp3
+    // Parameters: -re, -i, -vn, -acodec libmp3lame, -ar 48000, -b:a 192k, -f mp3, -t (if duration)
     const ffmpegCmd = [
       'ffmpeg',
       '-re',
-      '-i', streamUrl
+      '-i', streamUrl,
+      '-vn',  // No video
+      '-acodec', 'libmp3lame',
+      '-ar', '48000',
+      '-b:a', '192k',
+      '-f', 'mp3',
+      '-fflags', '+flush_packets',
+      '-flush_packets', '1'
     ];
 
-    // Add duration limit if specified (before -vn)
+    // Add duration limit as OUTPUT option (after output format)
+    // This ensures duration is based on wall-clock time, not input frame rate
     if (durationMinutes && durationMinutes > 0) {
       const durationSeconds = durationMinutes * 60;
       ffmpegCmd.push('-t', String(durationSeconds));
       console.log(`Cron: Recording "${name}" will stop automatically after ${durationMinutes} minutes`);
     }
 
-    ffmpegCmd.push(
-      '-vn',
-      '-acodec', 'libmp3lame',
-      '-ar', '48000',
-      '-b:a', '192k',
-      '-f', 'mp3',
-      '-fflags', '+flush_packets',
-      '-flush_packets', '1',
-      outputPath
-    );
+    ffmpegCmd.push(outputPath);
 
     // Spawn ffmpeg process
     const ffmpegProcess = spawn(ffmpegCmd[0], ffmpegCmd.slice(1), {
