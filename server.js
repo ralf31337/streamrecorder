@@ -22,6 +22,10 @@ const CRON_FILE = path.join(process.env.OUTPUT_DIR || '/recordings', 'cron.json'
 // Store active cron jobs
 const activeCronJobs = new Map();
 
+// Store active recording processes (in-memory for direct control)
+// Key: recording name, Value: { process, name, outputPath, startTime, streamUrl, durationMinutes }
+const activeRecordings = new Map();
+
 // Load persisted state from file
 function loadStateFile() {
   try {
@@ -147,10 +151,36 @@ async function syncStateWithPs() {
   return cleanedRecordings;
 }
 
-// Get current active recordings (synced with ps)
-async function getActiveRecordings() {
-  await syncStateWithPs();
-  return loadStateFile();
+// Get current active recordings (from in-memory Map, synced with state file)
+function getActiveRecordings() {
+  // Return recordings from in-memory Map
+  return Array.from(activeRecordings.values()).map(rec => ({
+    name: rec.name,
+    outputPath: rec.outputPath,
+    startTime: rec.startTime,
+    streamUrl: rec.streamUrl,
+    pid: rec.process.pid,
+    durationMinutes: rec.durationMinutes || null
+  }));
+}
+
+// Remove recording from active Map and state file
+function removeRecording(name) {
+  activeRecordings.delete(name);
+  // Update state file
+  const recordings = getActiveRecordings();
+  if (recordings.length === 0) {
+    // Remove state file if no recordings
+    try {
+      if (fs.existsSync(STATE_FILE)) {
+        fs.unlinkSync(STATE_FILE);
+      }
+    } catch (error) {
+      console.error('Error removing empty state file:', error);
+    }
+  } else {
+    saveStateFile(recordings);
+  }
 }
 
 // Validate name (letters and numbers only)
@@ -222,8 +252,7 @@ app.post('/api/record/start', async (req, res) => {
   }
 
   // Check if already recording with this name
-  const activeRecordings = await getActiveRecordings();
-  if (activeRecordings.some(r => r.name === name)) {
+  if (activeRecordings.has(name)) {
     return res.status(400).json({ error: 'Recording with this name is already in progress' });
   }
 
@@ -257,43 +286,33 @@ app.post('/api/record/start', async (req, res) => {
     outputPath
   ];
 
-  // Spawn ffmpeg process with detached option to survive parent death
+  // Spawn ffmpeg process (non-detached for direct control)
   const ffmpegProcess = spawn(ffmpegCmd[0], ffmpegCmd.slice(1), {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: true  // Process becomes independent, survives parent death
+    stdio: 'ignore'  // Ignore all stdio for cleaner operation
   });
-  
-  // Unref the process so Node.js can exit independently
-  ffmpegProcess.unref();
 
-  // Store process info in state file
+  // Store process info in memory and state file
   const startTime = new Date();
-  const stateRecordings = loadStateFile();
-  stateRecordings.push({
+  const recordingInfo = {
+    process: ffmpegProcess,
     name: name,
     outputPath: outputPath,
     startTime: startTime.toISOString(),
     streamUrl: streamUrl,
-    pid: ffmpegProcess.pid
-  });
-  saveStateFile(stateRecordings);
+    durationMinutes: null
+  };
+  activeRecordings.set(name, recordingInfo);
+  saveStateFile(getActiveRecordings());
 
-  // Handle process events (for immediate feedback, but process will survive if Node.js dies)
-  let stderrOutput = '';
-  ffmpegProcess.stderr.on('data', (data) => {
-    stderrOutput += data.toString();
-  });
-
+  // Handle process events (reliable with non-detached processes)
   ffmpegProcess.on('exit', (code, signal) => {
     console.log(`Recording "${name}" finished with code ${code}, signal ${signal}`);
-    // Clean up state file
-    syncStateWithPs();
+    removeRecording(name);
   });
 
   ffmpegProcess.on('error', (error) => {
     console.error(`Error starting recording "${name}":`, error);
-    // Clean up state file
-    syncStateWithPs();
+    removeRecording(name);
   });
 
   res.json({
@@ -312,29 +331,27 @@ app.post('/api/record/stop', async (req, res) => {
     return res.status(400).json({ error: 'Name is required' });
   }
 
-  const recordings = await getActiveRecordings();
-  const recording = recordings.find(r => r.name === name);
+  const recording = activeRecordings.get(name);
   
   if (!recording) {
     return res.status(404).json({ error: 'No active recording found with this name' });
   }
 
-  // Kill process by PID
+  // Kill process directly (reliable with non-detached processes)
   try {
-    process.kill(recording.pid, 'SIGTERM');
+    recording.process.kill('SIGTERM');
     setTimeout(() => {
       try {
-        process.kill(recording.pid, 'SIGKILL');
+        if (!recording.process.killed) {
+          recording.process.kill('SIGKILL');
+        }
       } catch (e) {
         // Process already dead
       }
     }, 2000);
   } catch (error) {
-    console.error(`Error killing process ${recording.pid}:`, error);
+    console.error(`Error killing process for "${name}":`, error);
   }
-
-  // Sync state to remove the stopped recording
-  await syncStateWithPs();
 
   res.json({
     success: true,
@@ -346,27 +363,25 @@ app.post('/api/record/stop', async (req, res) => {
 
 // Stop all recordings endpoint
 app.post('/api/record/stop-all', async (req, res) => {
-  const recordings = await getActiveRecordings();
   const stopped = [];
   
-  for (const recording of recordings) {
+  for (const [name, recording] of activeRecordings.entries()) {
     try {
-      process.kill(recording.pid, 'SIGTERM');
+      recording.process.kill('SIGTERM');
       setTimeout(() => {
         try {
-          process.kill(recording.pid, 'SIGKILL');
+          if (!recording.process.killed) {
+            recording.process.kill('SIGKILL');
+          }
         } catch (e) {
           // Process already dead
         }
       }, 2000);
       stopped.push({ name: recording.name, outputPath: recording.outputPath });
     } catch (error) {
-      console.error(`Error stopping recording "${recording.name}":`, error);
+      console.error(`Error stopping recording "${name}":`, error);
     }
   }
-  
-  // Sync state to remove all stopped recordings
-  await syncStateWithPs();
 
   res.json({
     success: true,
@@ -379,10 +394,8 @@ app.post('/api/record/stop-all', async (req, res) => {
 app.get('/api/record/status', async (req, res) => {
   const { name } = req.query;
 
-  const recordings = await getActiveRecordings();
-
   if (name) {
-    const recording = recordings.find(r => r.name === name);
+    const recording = activeRecordings.get(name);
     if (!recording) {
       return res.json({ active: false });
     }
@@ -396,7 +409,7 @@ app.get('/api/record/status', async (req, res) => {
   }
 
   // Return all active recordings
-  res.json({ activeRecordings: recordings });
+  res.json({ activeRecordings: getActiveRecordings() });
 });
 
 // Health check
@@ -432,8 +445,7 @@ function saveCronSchedule(schedule) {
 async function startRecordingFromCron(streamUrl, name, durationMinutes = null) {
   try {
     // Check if already recording with this name
-    const activeRecordings = await getActiveRecordings();
-    if (activeRecordings.some(r => r.name === name)) {
+    if (activeRecordings.has(name)) {
       console.log(`Cron: Recording "${name}" already in progress, skipping`);
       return;
     }
@@ -455,48 +467,58 @@ async function startRecordingFromCron(streamUrl, name, durationMinutes = null) {
     // Parameters: -re, -i, -t (if duration), -vn, -acodec libmp3lame, -ar 48000, -b:a 192k, -f mp3
     const ffmpegCmd = [
       'ffmpeg',
+      // Read input in realtime 
       '-re',
-      '-i', streamUrl
     ];
 
-    // Add duration limit as INPUT option (right after input URL)
+    // Add duration limit
     if (durationMinutes && durationMinutes > 0) {
       const durationSeconds = durationMinutes * 60;
       ffmpegCmd.push('-t', String(durationSeconds));
       console.log(`Cron: Recording "${name}" will stop automatically after ${durationMinutes} minutes`);
     }
 
+    // Input stream
+    ffmpegCmd.push('-i', streamUrl);
+
     // Add encoding options
     ffmpegCmd.push(
-      '-vn',  // No video
+        '-vn',  // No video
       '-acodec', 'libmp3lame',
       '-ar', '48000',
       '-b:a', '192k',
       '-f', 'mp3',
-      '-fflags', '+flush_packets',
-      '-flush_packets', '1',
       outputPath
     );
 
-    // Spawn ffmpeg process
+    // Spawn ffmpeg process (non-detached for direct control)
     const ffmpegProcess = spawn(ffmpegCmd[0], ffmpegCmd.slice(1), {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true
+      stdio: 'ignore'  // Ignore all stdio for cleaner operation
     });
-    ffmpegProcess.unref();
 
-    // Store in state file
+    // Store process info in memory and state file
     const startTime = new Date();
-    const stateRecordings = loadStateFile();
-    stateRecordings.push({
+    const recordingInfo = {
+      process: ffmpegProcess,
       name: name,
       outputPath: outputPath,
       startTime: startTime.toISOString(),
       streamUrl: streamUrl,
-      pid: ffmpegProcess.pid,
       durationMinutes: durationMinutes || null
+    };
+    activeRecordings.set(name, recordingInfo);
+    saveStateFile(getActiveRecordings());
+
+    // Handle process events (reliable with non-detached processes)
+    ffmpegProcess.on('exit', (code, signal) => {
+      console.log(`Cron: Recording "${name}" finished with code ${code}, signal ${signal}`);
+      removeRecording(name);
     });
-    saveStateFile(stateRecordings);
+
+    ffmpegProcess.on('error', (error) => {
+      console.error(`Cron: Error in recording "${name}":`, error);
+      removeRecording(name);
+    });
 
     console.log(`Cron: Started recording "${name}" (PID ${ffmpegProcess.pid})${durationMinutes ? `, duration: ${durationMinutes} minutes` : ', no duration limit'}`);
   } catch (error) {
@@ -680,12 +702,17 @@ app.get('/api/cron/status', (req, res) => {
 
 // ==================== END CRON SCHEDULER ====================
 
-// Sync state on startup
-syncStateWithPs().then(() => {
-  console.log('State synchronized with running processes');
-}).catch(err => {
-  console.error('Error syncing state on startup:', err);
-});
+// Clean up stale state file on startup (processes are tracked in-memory now)
+// In Docker, container restart = fresh process space, so no orphaned processes exist
+try {
+  if (fs.existsSync(STATE_FILE)) {
+    // Remove stale state file - it will be recreated when recordings start
+    fs.unlinkSync(STATE_FILE);
+    console.log('Cleaned up stale state file from previous run');
+  }
+} catch (error) {
+  console.error('Error cleaning up state file on startup:', error);
+}
 
 // Load and start cron jobs on startup
 loadAndStartCronJobs();
